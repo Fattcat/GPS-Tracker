@@ -3,20 +3,21 @@
 #include <SPI.h>
 #include <SD.h>
 
+#define GPS_RX 16
+#define GPS_TX 17
+#define SD_CS 5
+#define BUZZER_PIN 4
+
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1); // UART1 pre GPS
-
-const int GPS_RX = 16;
-const int GPS_TX = 17;
-const int SD_CS = 5;
-const int BUZZER_PIN = 4; // Piezo bzučiak
-
 File kmlFile;
+
 unsigned long lastLogTime = 0;
 unsigned long startTime = 0;
 bool kmlInitialized = false;
 bool kmlFinalized = false;
-bool gpsFixSignaled = false;
+bool anyDataLogged = false;
+bool gpsFixAnnounced = false;
 
 void setup() {
   Serial.begin(115200);
@@ -29,10 +30,6 @@ void setup() {
   }
   Serial.println("✅ SD karta OK");
 
-  if (SD.exists("/track.kml") && !kmlFinalized) {
-    finalizeKML();
-  }
-
   initKML();
   startTime = millis();
 }
@@ -42,12 +39,13 @@ void loop() {
     gps.encode(SerialGPS.read());
   }
 
-  if (gps.location.isUpdated() && gps.location.isValid()) {
-    if (!gpsFixSignaled && gps.satellites.value() >= 4) {
-      gpsFixSignaled = true;
-      signalGPSFix(); // 3× krátke pípnutia
-    }
+  // Ak je pripojenie k satelitom a ešte nebolo oznámené:
+  if (gps.satellites.value() >= 4 && !gpsFixAnnounced) {
+    signalGPSFix();
+    gpsFixAnnounced = true;
+  }
 
+  if (gps.location.isUpdated() && gps.location.isValid()) {
     if (millis() - lastLogTime >= 2000 && !kmlFinalized) {
       lastLogTime = millis();
 
@@ -60,18 +58,16 @@ void loop() {
 
       logGPS(lat, lng);
       printGPSInfo(lat, lng, alt, sats, hdop, speed);
+      anyDataLogged = true;
     }
   }
 
-  // Skrátené ukončenie po 2 minútach
+  // Po 2 minútach ukonči KML
   if (millis() - startTime >= 2 * 60 * 1000UL && !kmlFinalized) {
     finalizeKML();
-    kmlFinalized = true;
-    Serial.println("✅ Trasa bola uložená po 2 minútach.");
   }
 }
 
-// Inicializácia KML súboru
 void initKML() {
   SD.remove("/track.kml");
   kmlFile = SD.open("/track.kml", FILE_WRITE);
@@ -89,7 +85,6 @@ void initKML() {
   }
 }
 
-// Logovanie bodu do KML
 void logGPS(double lat, double lng) {
   if (!kmlInitialized || kmlFinalized) return;
 
@@ -104,7 +99,6 @@ void logGPS(double lat, double lng) {
   }
 }
 
-// Dokončenie KML súboru
 void finalizeKML() {
   kmlFile = SD.open("/track.kml", FILE_APPEND);
   if (kmlFile) {
@@ -115,10 +109,17 @@ void finalizeKML() {
     kmlFile.println("</kml>");
     kmlFile.close();
   }
+
   kmlFinalized = true;
+
+  if (!anyDataLogged) {
+    Serial.println("⚠️ Nezaznamenané žiadne GPS súradnice!");
+    signalNoGPSData();
+  } else {
+    Serial.println("✅ KML súbor bol úspešne uložený.");
+  }
 }
 
-// Výpis info do Serial monitora
 void printGPSInfo(double lat, double lng, double alt, int sats, double hdop, double speed) {
   Serial.println("------ GPS INFO ------");
   Serial.print("🧭 Latitude: ");  Serial.println(lat, 6);
@@ -127,15 +128,23 @@ void printGPSInfo(double lat, double lng, double alt, int sats, double hdop, dou
   Serial.print("📡 Satelity: ");  Serial.println(sats);
   Serial.print("🎯 Presnosť (HDOP): "); Serial.println(hdop);
   Serial.print("🚴 Rýchlosť: "); Serial.print(speed, 1); Serial.println(" km/h");
-  Serial.println("----------------------\n");
+  Serial.println("----------------------");
+  Serial.println();
 }
 
-// Zvuková signalizácia získania GPS fixu (3× krátke pípnutie)
+// ▶️ Signalizácia fixu (3x krátke pípnutia)
 void signalGPSFix() {
   for (int i = 0; i < 3; i++) {
-    digitalWrite(BUZZER_PIN, HIGH);
+    tone(BUZZER_PIN, 2000); // vyšší tón
     delay(100);
-    digitalWrite(BUZZER_PIN, LOW);
+    noTone(BUZZER_PIN);
     delay(100);
   }
+}
+
+// ❗ Signalizácia chyby – nezaznamenané dáta
+void signalNoGPSData() {
+  tone(BUZZER_PIN, 800); // nižší tón
+  delay(800);
+  noTone(BUZZER_PIN);
 }
