@@ -11,12 +11,9 @@ def extract_coordinates_from_kml(kml_file):
     # KML namespace
     ns = {'kml': 'http://www.opengis.net/kml/2.2'}
     
-    # Načítame XML z KML súboru
     root = ET.fromstring(doc)
-
     coords = []
 
-    # Prejdeme všetky elementy <coordinates>
     coordinates_elements = root.findall('.//kml:coordinates', ns)
     
     if not coordinates_elements:
@@ -27,10 +24,9 @@ def extract_coordinates_from_kml(kml_file):
         coord_text = coordinates.text.strip()
         if coord_text:
             print(f"🔍 Nájdeme súradnice: {coord_text}")  # Debugging
-            # Splitovanie súradníc
             coord_pairs = coord_text.split()
             for pair in coord_pairs:
-                lat, lon, _ = pair.split(',')
+                lon, lat, _ = pair.split(',')  # POZOR: v KML sú súradnice v poradí lon, lat
                 coords.append((float(lat), float(lon)))
 
     return coords
@@ -41,25 +37,25 @@ def create_map(coords):
         print("❌ Žiadne súradnice sa nenašli.")
         return
 
-    # Vytvoríme mapu s počiatočnou polohou na prvých súradniciach
-    m = folium.Map(location=coords[0], zoom_start=30)
+    # Použijeme "CartoDB Dark Matter" ako dlaždice (čierne pozadie s bielou mriežkou)
+    m = folium.Map(
+        location=coords[0],
+        zoom_start=16,
+        tiles="CartoDB dark_matter"
+    )
 
-    # Pridáme čiaru, ktorá spája všetky súradnice
-    folium.PolyLine(coords, color="blue", weight=1).add_to(m)
+    # Pridáme čiaru a značky
+    folium.PolyLine(coords, color="white", weight=2).add_to(m)
+    folium.Marker(coords[0], tooltip="Štart", icon=folium.Icon(color="green")).add_to(m)
+    folium.Marker(coords[-1], tooltip="Koniec", icon=folium.Icon(color="red")).add_to(m)
 
-    # Pridáme markery na začiatok a koniec trasy
-    folium.Marker(coords[0], tooltip="Štart").add_to(m)
-    folium.Marker(coords[-1], tooltip="Koniec").add_to(m)
-
-    # Uložíme mapu do HTML súboru a otvoríme ju v prehliadači
+    # Uložíme mapu
     map_path = os.path.abspath("gps_map.html")
     m.save(map_path)
     webbrowser.open(f"file://{map_path}")
     print("✅ Mapa bola otvorená v prehliadači.")
 
-# Testovanie - získame súradnice z KML a vytvoríme mapu
-kml_file = "track.kml" # --------------------------- > Change to YOUR .kml File < ---------------------------
+# Spustenie
+kml_file = "track.kml"
 coords = extract_coordinates_from_kml(kml_file)
-
-# Ak boli nájdené súradnice, vytvoríme mapu
 create_map(coords)
