@@ -13,3 +13,23 @@ GPS-Tracker - Simple device for track some stuff when u forgot it somewhere xD.
 - Jumper Wires
 - TFT st7789 240x320px 2.4 inch display (no touch)
 - SD Card (8 GB no higher capacity because it cpuld show you errors)
+
+## I highly reccommend to use this
+- ```esp32-SD-KML-GPS-V3.ino```
+- or ```esp32-SD-GPS-KML2.ino```
+- Then go on a trip and after that unplug your SD card & add this to the ***bottom*** in your .kml file:
+```
+      </coordinates>
+    </LineString>
+</Placemark>
+</Document>
+</kml>
+```
+- now open ```KmlToBrowserMap.py``` in VS Code
+- Install necessary modules with
+```
+pip install folium kml lxml folium webbrowser
+``` 
+- and write down ```your``` exact file name of .kml file
+- now start ```KmlToBrowserMap.py``` and it will show your way on web map
+## Please support my work with Github Star :D
