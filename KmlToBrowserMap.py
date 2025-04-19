@@ -40,12 +40,12 @@ def create_map(coords):
     # Použijeme "CartoDB Dark Matter" ako dlaždice (čierne pozadie s bielou mriežkou)
     m = folium.Map(
         location=coords[0],
-        zoom_start=16,
+        zoom_start=18,
         tiles="CartoDB dark_matter"
     )
 
     # Pridáme čiaru a značky
-    folium.PolyLine(coords, color="white", weight=2).add_to(m)
+    folium.PolyLine(coords, color="blue", weight=2).add_to(m)
     folium.Marker(coords[0], tooltip="Štart", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[-1], tooltip="Koniec", icon=folium.Icon(color="red")).add_to(m)
 
@@ -56,6 +56,6 @@ def create_map(coords):
     print("✅ Mapa bola otvorená v prehliadači.")
 
 # Spustenie
-kml_file = "track.kml"
+kml_file = "track.kml" #
 coords = extract_coordinates_from_kml(kml_file)
 create_map(coords)
