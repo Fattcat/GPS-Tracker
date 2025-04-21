@@ -178,15 +178,35 @@ void displayInfo() {
   display.setCursor((SCREEN_WIDTH - localDateStr.length() * 6) / 2, 42);
   display.println(localDateStr); // Dátum
 
-  // Zobrazenie počtu satelitov v pravom dolnom rohu
+  // Počet satelitov v pravom dolnom rohu
   int satCount = gps.satellites.isValid() ? gps.satellites.value() : 0;
   char satBuf[5];
   sprintf(satBuf, "%d", satCount);
   display.setCursor(SCREEN_WIDTH - strlen(satBuf) * 6, SCREEN_HEIGHT - 8);
   display.print(satBuf);
 
+  // HDOP ako text v ľavom dolnom rohu
+  String hdopStatus = "Nepripojene";
+  if (gps.hdop.isValid()) {
+    float hdop = gps.hdop.hdop();
+    if (hdop <= 2.0) {
+      hdopStatus = "Vyborne";
+    } else if (hdop <= 5.0) {
+      hdopStatus = "Dobre";
+    } else if (hdop <= 10.0) {
+      hdopStatus = "Slabe";
+    } else {
+      hdopStatus = "Nepripojene";
+    }
+  }
+
+  display.setTextSize(1);
+  display.setCursor(0, SCREEN_HEIGHT - 8);
+  display.print(hdopStatus);
+
   display.display();
 }
+
 
 void signalGPSFix() {
   for (int i = 0; i < 3; i++) {
