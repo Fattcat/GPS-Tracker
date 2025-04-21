@@ -5,9 +5,10 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 
-// I delete function with DHT11 sensor, because esp32 could NOT STAND power delivering for too many devices, sensors
+// I deleted function with DHT11 sensor, because esp32 could NOT STAND power delivering for too many devices, sensors
 // It would be so nice, if it would works but in my case it did NOT !
 // I tried it and it WORKS but then GPS did NOT work :( !
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -47,6 +48,7 @@ void setup() {
   }
 
   display.clearDisplay();
+  delay(50); // Pre istotu nejaké oneskorenie pretože na displeji sa  
   display.setTextColor(SSD1306_WHITE);
 
   pinMode(BUZZER_PIN, OUTPUT);
@@ -170,11 +172,18 @@ void displayInfo() {
 
   display.setTextSize(3);
   display.setCursor(15, 10);
-  display.println(localTimeStr);
+  display.println(localTimeStr); // Čas
 
   display.setTextSize(1);
   display.setCursor((SCREEN_WIDTH - localDateStr.length() * 6) / 2, 42);
-  display.println(localDateStr);
+  display.println(localDateStr); // Dátum
+
+  // Zobrazenie počtu satelitov v pravom dolnom rohu
+  int satCount = gps.satellites.isValid() ? gps.satellites.value() : 0;
+  char satBuf[5];
+  sprintf(satBuf, "%d", satCount);
+  display.setCursor(SCREEN_WIDTH - strlen(satBuf) * 6, SCREEN_HEIGHT - 8);
+  display.print(satBuf);
 
   display.display();
 }
