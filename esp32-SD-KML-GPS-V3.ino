@@ -18,6 +18,7 @@ unsigned long lastWarningTime = 0;
 bool kmlStarted = false;
 bool gpsFixAnnounced = false;
 char kmlFileName[20]; // napr. "track1234.kml"
+String currentKMLPath;
 
 void setup() {
   Serial.begin(115200);
@@ -26,13 +27,14 @@ void setup() {
 
   if (!SD.begin(SD_CS)) {
     Serial.println("❌ SD karta sa nenašla alebo nie je pripojená!");
-    signalCriticalError(); // dlhé pípnutie
-    while (1); // zastav program
+    signalCriticalError();
+    while (1);
   }
 
   Serial.println("✅ SD karta inicializovaná.");
-  createNewKMLFile();
-  initKML();
+  createNewKMLFile(); // vytvorí názov do kmlFileName
+  currentKMLPath = String(kmlFileName); // nastaví cestu pre globálne použitie
+  initKML(); // vytvorí súbor a otvorí XML hlavičku
 }
 
 void loop() {
@@ -40,8 +42,12 @@ void loop() {
     char c = SerialGPS.read();
     gps.encode(c);
 
-    if (!gps.location.isValid()) {
-      Serial.write(c);
+  if (gps.location.isValid() && gps.altitude.isValid() && gps.time.isValid()) {
+    double lat = gps.location.lat();
+    double lng = gps.location.lng();
+    double alt = gps.altitude.meters();
+    
+    logGPS(lat, lng, alt, gps.time.hour(), gps.time.minute(), gps.time.second());
     }
   }
 
@@ -61,7 +67,7 @@ void loop() {
       double hdop = gps.hdop.hdop();
       double speed = gps.speed.kmph();
 
-      logGPS(lat, lng);
+      logGPS(lat, lng, alt, gps.time.hour(), gps.time.minute(), gps.time.second());
       printGPSInfo(lat, lng, alt, sats, hdop, speed);
       lastGPSWriteTime = millis();
     }
@@ -110,15 +116,16 @@ void initKML() {
   }
 }
 
-void logGPS(double lat, double lng) {
+void logGPS(double lat, double lng, double alt, int hour, int minute, int second) {
   if (!kmlStarted) return;
 
-  kmlFile = SD.open(kmlFileName, FILE_APPEND);
+  File kmlFile = SD.open(currentKMLPath, FILE_APPEND);
   if (kmlFile) {
-    kmlFile.printf("        %.6f,%.6f,0\n", lng, lat);
+    kmlFile.printf("        <!-- %02d:%02d:%02d UTC -->\n", hour, minute, second);
+    kmlFile.printf("        %.6f,%.6f,%.1f\n", lng, lat, alt);
     kmlFile.close();
   } else {
-    Serial.println("⚠️ Chyba pri zapisovaní do súboru!");
+    Serial.println("⚠️ Chyba pri zápise do KML.");
     signalWriteFailure();
   }
 }
