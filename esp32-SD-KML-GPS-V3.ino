@@ -17,6 +17,7 @@ unsigned long lastGPSWriteTime = 0;
 unsigned long lastWarningTime = 0;
 bool kmlStarted = false;
 bool gpsFixAnnounced = false;
+char kmlFileName[20]; // napr. "track1234.kml"
 
 void setup() {
   Serial.begin(115200);
@@ -30,6 +31,7 @@ void setup() {
   }
 
   Serial.println("✅ SD karta inicializovaná.");
+  createNewKMLFile();
   initKML();
 }
 
@@ -38,7 +40,6 @@ void loop() {
     char c = SerialGPS.read();
     gps.encode(c);
 
-    // Ak nie je fix, zobrazuj NMEA
     if (!gps.location.isValid()) {
       Serial.write(c);
     }
@@ -66,16 +67,31 @@ void loop() {
     }
   }
 
-  // Varovanie pri chýbajúcom logovaní
   if (millis() - lastGPSWriteTime > 30000 && millis() - lastWarningTime > 30000) {
     signalWriteFailure();
     lastWarningTime = millis();
   }
 }
 
+void createNewKMLFile() {
+  int fileIndex = 1;
+
+  // Prehľadáva možné názvy súborov až po track9999.kml
+  for (int i = 1; i <= 9999; i++) {
+    sprintf(kmlFileName, "/track%04d.kml", i);
+    if (!SD.exists(kmlFileName)) {
+      fileIndex = i;
+      break;
+    }
+  }
+
+  sprintf(kmlFileName, "/track%04d.kml", fileIndex);
+  Serial.print("🆕 Nový súbor: ");
+  Serial.println(kmlFileName);
+}
+
 void initKML() {
-  SD.remove("/track.kml");
-  kmlFile = SD.open("/track.kml", FILE_WRITE);
+  kmlFile = SD.open(kmlFileName, FILE_WRITE);
 
   if (kmlFile) {
     kmlFile.println("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
@@ -89,7 +105,7 @@ void initKML() {
     kmlFile.close();
     kmlStarted = true;
   } else {
-    Serial.println("❌ Chyba pri vytváraní súboru track.kml");
+    Serial.println("❌ Chyba pri vytváraní súboru.");
     signalCriticalError();
   }
 }
@@ -97,7 +113,7 @@ void initKML() {
 void logGPS(double lat, double lng) {
   if (!kmlStarted) return;
 
-  kmlFile = SD.open("/track.kml", FILE_APPEND);
+  kmlFile = SD.open(kmlFileName, FILE_APPEND);
   if (kmlFile) {
     kmlFile.printf("        %.6f,%.6f,0\n", lng, lat);
     kmlFile.close();
@@ -119,7 +135,6 @@ void printGPSInfo(double lat, double lng, double alt, int sats, double hdop, dou
   Serial.println();
 }
 
-// ▶️ 3x pípnutie pre GPS fix
 void signalGPSFix() {
   for (int i = 0; i < 3; i++) {
     tone(BUZZER_PIN, 2000); delay(100);
@@ -127,7 +142,6 @@ void signalGPSFix() {
   }
 }
 
-// ❗ 5x pípnutie pre chybu zápisu
 void signalWriteFailure() {
   for (int i = 0; i < 5; i++) {
     tone(BUZZER_PIN, 1000); delay(80);
@@ -135,7 +149,6 @@ void signalWriteFailure() {
   }
 }
 
-// ❌ Dlhý tón pre kritickú chybu (napr. SD karta)
 void signalCriticalError() {
   tone(BUZZER_PIN, 500); delay(1000);
   noTone(BUZZER_PIN);
