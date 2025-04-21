@@ -8,6 +8,8 @@ GPS-Tracker - Simple device for track some stuff when u forgot it somewhere xD.
 # Necesarry devices to use
 - Arduino nano or esp32
 - Buzzer, SD card module, GPS neo6m
+- Oled 0.96" display (in some case)
+- 2 Buttons and DHT11 sensor
   - (I recommend esp32 because its 3.3V logic on all pins and arduino nano or uno is 5V logic so use 10 kOhm resistors to power it, and connect pins through arduino pins)
 - so please use esp32 for saving time and without ugly wiring.
 - Jumper Wires
