@@ -1,10 +1,9 @@
-<p text-align="center"> GPS-Tracker </p>
-- Simple device for track some stuff when u forgot it somewhere xD.
-# Setup
+# Simple device for track some stuff when u forgot it somewhere xD.
+## Setup
 - Download map (in some codes it works without just with uploading .kml file to google earth) from ```OpenStreetMap``` or ```Google Maps Static API``` of your AREA and resize it to 240x320px with 24Bit without compression
 - save .bmp file of your map to SD Card
 - change Latitude, Lontitude GPS coordinates as is in your map (it is LAT_MIN, LAT_MAX and LON_MIN, LON_MAX)
-# Necesarry devices to use
+## Necesarry devices to use
 -  esp32 or Mega2560
 - Buzzer, SD card module, GPS neo6m
 - Oled 0.96" display (in esp32-SD-KML-GPS-OledV3.ino)
