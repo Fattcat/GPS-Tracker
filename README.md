@@ -1,9 +1,9 @@
-# Simple device for track some stuff when u forgot it somewhere xD.
-## Setup
+# <p align="center">Simple device for tracking GPS with kml.</p>
+## <p align="center">Setup</p>
 - Download map (in some codes it works without just with uploading .kml file to google earth) from ```OpenStreetMap``` or ```Google Maps Static API``` of your AREA and resize it to 240x320px with 24Bit without compression
 - save .bmp file of your map to SD Card
 - change Latitude, Lontitude GPS coordinates as is in your map (it is LAT_MIN, LAT_MAX and LON_MIN, LON_MAX)
-## Necesarry devices to use
+## <p align="center">Necesarry devices to use</p>
 -  esp32 or Mega2560
 - Buzzer, SD card module, GPS neo6m
 - Oled 0.96" display (in esp32-SD-KML-GPS-OledV3.ino)
@@ -15,7 +15,7 @@
   - This isnt used because it is hard to be power to save
 - SD Card (8 GB no higher capacity because it cpuld show you errors)
 
-## connection
+## <p align="center">connection</p>
 - for ```esp32-SD-KML-GPS-OledV3.ino```
   - ### Oled display
     - VCC --> 3.3V
@@ -49,6 +49,7 @@
 </Document>
 </kml>
 ```
+## <p align="center">Python code</p>
 - now open ```KmlToBrowserMap.py``` in VS Code
 - Install necessary modules with
 ```
