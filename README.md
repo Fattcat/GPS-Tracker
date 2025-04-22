@@ -53,7 +53,7 @@
 - now open ```KmlToBrowserMap.py``` in VS Code
 - Install necessary modules with
 ```
-pip install folium kml lxml folium webbrowser
+pip install folium kml lxml webbrowser
 ``` 
 - and write down ```your``` exact file name of .kml file
 - now start ```KmlToBrowserMap.py``` and it will show your way on web map
