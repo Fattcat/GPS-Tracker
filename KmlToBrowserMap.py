@@ -57,7 +57,7 @@ def create_map(coords, total_distance):
         print("❌ Žiadne súradnice sa nenašli.")
         return
 
-    m = folium.Map(location=coords[0], zoom_start=18, tiles="CartoDB dark_matter")
+    m = folium.Map(location=coords[0], zoom_start=18, tiles="OpenStreetMap") # tu bolo CartoDB dark_matter 
     folium.PolyLine(coords, color="blue", weight=2).add_to(m)
     folium.Marker(coords[0], tooltip="Štart", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[-1], tooltip="Koniec", icon=folium.Icon(color="red")).add_to(m)
