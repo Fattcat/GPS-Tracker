@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Hviezdicová trasa</name>
+    
+    <!-- Trasa v tvare hviezdy -->
+    <Placemark>
+      <name>Trasa - Hviezda</name>
+      <Style>
+        <LineStyle>
+          <color>ff0000ff</color> <!-- červená čiara -->
+          <width>3</width>
+        </LineStyle>
+      </Style>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>
+          19.700,49.150,1200  <!-- stred -->
+          19.705,49.160,1200  <!-- cíp 1 -->
+          19.695,49.157,1200  <!-- cíp 2 -->
+          19.708,49.145,1200  <!-- cíp 3 -->
+          19.692,49.145,1200  <!-- cíp 4 -->
+          19.705,49.157,1200  <!-- cíp 5 -->
+          19.700,49.150,1200  <!-- späť do stredu -->
+        </coordinates>
+      </LineString>
+    </Placemark>
+
+    <!-- Stredový bod -->
+    <Placemark>
+      <name>Stred</name>
+      <Point>
+        <coordinates>19.700,49.150,1200</coordinates>
+      </Point>
+    </Placemark>
+
+  </Document>
+</kml>
