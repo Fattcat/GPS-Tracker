@@ -8,6 +8,9 @@
 #define SD_CS 5
 #define BUZZER_PIN 4
 
+// Auth defined
+#define AUTH_ENABLED 1   // <<< Zmeň na 0 ak chceš vypnúť autentifikáciu
+
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);
 File kmlFile;
@@ -31,6 +34,14 @@ void setup() {
   }
   Serial.println("✅ SD karta OK");
   signalSDCardOK();
+
+  #if AUTH_ENABLED
+    if (!checkAuthentication()) {
+      while(1);
+    }
+  #else
+    Serial.println("⚠️ Autentifikácia je vypnutá cez AUTH_ENABLED");
+  #endif
 
   if (!checkAuthentication()) {
     // Ak autentifikácia zlyhá, triggerAuthAlarm() už beží donekonečna
@@ -191,7 +202,6 @@ bool checkAuthentication() {
   authFile.close();
   authLine.trim();  // odstráni medzery a nové riadky
 
-// Auth Code path  
   if (authLine == "AiJKJJIoloi5P74o") {
     Serial.println("✅ Autentifikácia SD karty úspešná.");
     return true;
