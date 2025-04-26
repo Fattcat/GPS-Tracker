@@ -31,6 +31,11 @@ void setup() {
   }
   Serial.println("✅ SD karta OK");
   signalSDCardOK();
+
+  if (!checkAuthentication()) {
+    // Ak autentifikácia zlyhá, triggerAuthAlarm() už beží donekonečna
+    while (1);
+  }
 }
 
 void loop() {
@@ -40,7 +45,6 @@ void loop() {
 
   bool hasFix = gps.satellites.value() >= 4 && gps.location.isValid();
 
-  // Pripojenie GPS bolo obnovené
   if (hasFix && !gpsPreviouslyConnected) {
     gpsPreviouslyConnected = true;
     Serial.println("----------------------------");
@@ -59,13 +63,11 @@ void loop() {
     }
   }
 
-  // GPS signál bol stratený
   if (!hasFix && gpsPreviouslyConnected) {
     gpsPreviouslyConnected = false;
     Serial.println("⚠️ GPS signál stratený. Čakám na obnovenie...");
   }
 
-  // Zapisuj len ak máme signál
   if (hasFix && gps.location.isUpdated()) {
     if (millis() - lastLogTime >= 2000) {
       lastLogTime = millis();
@@ -82,7 +84,6 @@ void loop() {
     }
   }
 
-  // Ak dlhšie nič neprišlo a nemáme fix, upozorni
   if (!hasFix && millis() - lastGPSWriteTime > 30000 && millis() - lastWarningTime > 30000) {
     signalNoFixWarning();
     lastWarningTime = millis();
@@ -174,4 +175,38 @@ void signalSDCardOK() {
   noTone(BUZZER_PIN);     delay(200);
   tone(BUZZER_PIN, 2500); delay(300);
   noTone(BUZZER_PIN);
+}
+
+// -------------------- AUTENTIFIKÁCIA --------------------
+
+bool checkAuthentication() {
+  File authFile = SD.open("/auth.txt", FILE_READ);
+  if (!authFile) {
+    Serial.println("❌ Súbor auth.txt sa nenašiel!");
+    triggerAuthAlarm();
+    return false;
+  }
+
+  String authLine = authFile.readStringUntil('\n');
+  authFile.close();
+  authLine.trim();  // odstráni medzery a nové riadky
+
+// Auth Code path  
+  if (authLine == "AiJKJJIoloi5P74o") {
+    Serial.println("✅ Autentifikácia SD karty úspešná.");
+    return true;
+  } else {
+    Serial.println("❌ Neplatný obsah súboru auth.txt!");
+    triggerAuthAlarm();
+    return false;
+  }
+}
+
+void triggerAuthAlarm() {
+  Serial.println("🚨 Autentifikácia zlyhala! Spúšťam alarm...");
+  while (true) {
+    tone(BUZZER_PIN, 1200); delay(300);
+    tone(BUZZER_PIN, 1500); delay(300);
+    noTone(BUZZER_PIN);     delay(200);
+  }
 }
