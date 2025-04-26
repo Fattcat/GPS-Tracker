@@ -61,3 +61,11 @@ pip install folium kml lxml webbrowser
 - and write down ```your``` exact file name of .kml file
 - now start ```KmlToBrowserMap.py``` and it will show your way on web map
 ## Please support my work with Github Star :D
+
+## Whats new ?
+  - added auth path (reduced SD card swapping)
+    - create file ```auth.txt``` with saved some 16 character long text
+    - example auth code for auth.txt ```123ABCabc456---```
+  - fixed GPS connection
+  - switch between turned auth and alarm on/off 
+  - added buzzer alarm
