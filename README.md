@@ -1,4 +1,4 @@
-# <p align="center">Simple device for tracking GPS with kml.</p>
+# <p align="center">Simple tracking GPS with kml & esp32</p>
 ## <p align="center">Setup</p>
 - Download map (in some codes it works without just with uploading .kml file to google earth) from ```OpenStreetMap``` or ```Google Maps Static API``` of your AREA and resize it to 240x320px with 24Bit without compression
 - save .bmp file of your map to SD Card
