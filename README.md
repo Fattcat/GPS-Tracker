@@ -31,6 +31,9 @@
     - SCK -->  D18
     - CS -->   D5
 
+  - ### Buzzer
+    - Buzzer pin --> D4
+
   - ### GPS neo6m
     - VCC -->  3.3V
     - GND -->  GND
