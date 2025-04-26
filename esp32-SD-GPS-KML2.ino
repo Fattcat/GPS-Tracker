@@ -9,8 +9,9 @@
 #define BUZZER_PIN 4
 
 TinyGPSPlus gps;
-HardwareSerial SerialGPS(1); // UART1 pre GPS
+HardwareSerial SerialGPS(1);
 File kmlFile;
+String currentKMLFile = "";
 
 unsigned long lastLogTime = 0;
 unsigned long lastGPSWriteTime = 0;
@@ -29,7 +30,8 @@ void setup() {
   }
   Serial.println("✅ SD karta OK");
 
-  initKML();
+  currentKMLFile = getNextKMLFilename();
+  initKML(currentKMLFile);
 }
 
 void loop() {
@@ -37,13 +39,11 @@ void loop() {
     gps.encode(SerialGPS.read());
   }
 
-  // Ak má GPS fix (napr. ≥4 satelity), zapípaj 3x
   if (gps.satellites.value() >= 4 && !gpsFixAnnounced) {
     signalGPSFix();
     gpsFixAnnounced = true;
   }
 
-  // Ak sú nové a validné súradnice
   if (gps.location.isUpdated() && gps.location.isValid()) {
     if (millis() - lastLogTime >= 2000) {
       lastLogTime = millis();
@@ -60,16 +60,32 @@ void loop() {
     }
   }
 
-  // Signalizuj, ak sa dlhšie neuložili GPS dáta
   if (millis() - lastGPSWriteTime > 30000 && millis() - lastWarningTime > 30000) {
     signalWriteFailure();
     lastWarningTime = millis();
   }
 }
 
-void initKML() {
-  SD.remove("/track.kml");
-  kmlFile = SD.open("/track.kml", FILE_WRITE);
+String getNextKMLFilename() {
+  for (int i = 0; i <= 999; i++) {
+    String name;
+    if (i == 0) {
+      name = "/track.kml";
+    } else {
+      name = "/track" + String(i) + ".kml";
+    }
+
+    if (!SD.exists(name)) {
+      return name;
+    }
+  }
+
+  // Ak všetky názvy súborov existujú
+  return "/track999.kml";
+}
+
+void initKML(String filename) {
+  kmlFile = SD.open(filename, FILE_WRITE);
   if (kmlFile) {
     kmlFile.println("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     kmlFile.println("<kml xmlns=\"http://www.opengis.net/kml/2.2\">");
@@ -81,13 +97,17 @@ void initKML() {
     kmlFile.println("      <coordinates>");
     kmlFile.close();
     kmlStarted = true;
+    Serial.print("📝 Vytvorený nový súbor: ");
+    Serial.println(filename);
+  } else {
+    Serial.println("❌ Nepodarilo sa vytvoriť KML súbor!");
   }
 }
 
 void logGPS(double lat, double lng) {
   if (!kmlStarted) return;
 
-  kmlFile = SD.open("/track.kml", FILE_APPEND);
+  kmlFile = SD.open(currentKMLFile, FILE_APPEND);
   if (kmlFile) {
     kmlFile.print("        ");
     kmlFile.print(lng, 6);
@@ -95,6 +115,8 @@ void logGPS(double lat, double lng) {
     kmlFile.print(lat, 6);
     kmlFile.println(",0");
     kmlFile.close();
+  } else {
+    Serial.println("❌ Chyba pri zápise do súboru.");
   }
 }
 
@@ -110,7 +132,6 @@ void printGPSInfo(double lat, double lng, double alt, int sats, double hdop, dou
   Serial.println();
 }
 
-// ▶️ Signalizácia GPS fixu (3x krátke pípnutia)
 void signalGPSFix() {
   for (int i = 0; i < 3; i++) {
     tone(BUZZER_PIN, 2000); delay(100);
@@ -118,7 +139,6 @@ void signalGPSFix() {
   }
 }
 
-// ❗ Signalizácia zlyhania zápisu (5x rýchle pípanie)
 void signalWriteFailure() {
   for (int i = 0; i < 5; i++) {
     tone(BUZZER_PIN, 1000); delay(80);
