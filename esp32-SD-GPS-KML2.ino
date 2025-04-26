@@ -18,6 +18,7 @@ unsigned long lastGPSWriteTime = 0;
 unsigned long lastWarningTime = 0;
 bool kmlStarted = false;
 bool gpsFixAnnounced = false;
+bool gpsPreviouslyConnected = false;
 
 void setup() {
   Serial.begin(115200);
@@ -29,9 +30,7 @@ void setup() {
     while (1);
   }
   Serial.println("✅ SD karta OK");
-
-  currentKMLFile = getNextKMLFilename();
-  initKML(currentKMLFile);
+  signalSDCardOK();
 }
 
 void loop() {
@@ -39,12 +38,35 @@ void loop() {
     gps.encode(SerialGPS.read());
   }
 
-  if (gps.satellites.value() >= 4 && !gpsFixAnnounced) {
-    signalGPSFix();
-    gpsFixAnnounced = true;
+  bool hasFix = gps.satellites.value() >= 4 && gps.location.isValid();
+
+  // Pripojenie GPS bolo obnovené
+  if (hasFix && !gpsPreviouslyConnected) {
+    gpsPreviouslyConnected = true;
+    Serial.println("----------------------------");
+    Serial.println("🔁 Pripojenie bolo obnovené ...");
+    Serial.println("📍 Pokračujem v doplňovaní GPS údajov ...");
+    Serial.println("----------------------------");
+
+    if (!gpsFixAnnounced) {
+      signalGPSFix();
+      gpsFixAnnounced = true;
+    }
+
+    if (!kmlStarted) {
+      currentKMLFile = getNextKMLFilename();
+      initKML(currentKMLFile);
+    }
   }
 
-  if (gps.location.isUpdated() && gps.location.isValid()) {
+  // GPS signál bol stratený
+  if (!hasFix && gpsPreviouslyConnected) {
+    gpsPreviouslyConnected = false;
+    Serial.println("⚠️ GPS signál stratený. Čakám na obnovenie...");
+  }
+
+  // Zapisuj len ak máme signál
+  if (hasFix && gps.location.isUpdated()) {
     if (millis() - lastLogTime >= 2000) {
       lastLogTime = millis();
       double lat = gps.location.lat();
@@ -60,8 +82,9 @@ void loop() {
     }
   }
 
-  if (millis() - lastGPSWriteTime > 30000 && millis() - lastWarningTime > 30000) {
-    signalWriteFailure();
+  // Ak dlhšie nič neprišlo a nemáme fix, upozorni
+  if (!hasFix && millis() - lastGPSWriteTime > 30000 && millis() - lastWarningTime > 30000) {
+    signalNoFixWarning();
     lastWarningTime = millis();
   }
 }
@@ -80,7 +103,6 @@ String getNextKMLFilename() {
     }
   }
 
-  // Ak všetky názvy súborov existujú
   return "/track999.kml";
 }
 
@@ -128,8 +150,7 @@ void printGPSInfo(double lat, double lng, double alt, int sats, double hdop, dou
   Serial.print("📡 Satelity: ");  Serial.println(sats);
   Serial.print("🎯 Presnosť (HDOP): "); Serial.println(hdop);
   Serial.print("🚴 Rýchlosť: "); Serial.print(speed, 1); Serial.println(" km/h");
-  Serial.println("----------------------");
-  Serial.println();
+  Serial.println("----------------------\n");
 }
 
 void signalGPSFix() {
@@ -139,9 +160,18 @@ void signalGPSFix() {
   }
 }
 
-void signalWriteFailure() {
+void signalNoFixWarning() {
   for (int i = 0; i < 5; i++) {
     tone(BUZZER_PIN, 1000); delay(80);
     noTone(BUZZER_PIN);     delay(80);
   }
+  Serial.println("--------------------\n⚠️ GPS NEpripojené !\n--------------------");
+  Serial.println("🔎 Prebieha vyhľadávanie a pripájanie k satelitom ...");
+}
+
+void signalSDCardOK() {
+  tone(BUZZER_PIN, 1500); delay(300);
+  noTone(BUZZER_PIN);     delay(200);
+  tone(BUZZER_PIN, 2500); delay(300);
+  noTone(BUZZER_PIN);
 }
