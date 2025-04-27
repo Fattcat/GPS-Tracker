@@ -27,9 +27,13 @@ void setup() {
   Serial.begin(115200);
   SerialGPS.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   pinMode(BUZZER_PIN, OUTPUT);
+  
+  delay(100);
 
   if (!SD.begin(SD_CS)) {
     Serial.println("❌ SD karta sa nenašla!");
+    signalSDCardFailed();
+    delay(50); // debounce wait delay
     while (1);
   }
   Serial.println("✅ SD karta OK");
@@ -186,6 +190,13 @@ void signalSDCardOK() {
   noTone(BUZZER_PIN);     delay(200);
   tone(BUZZER_PIN, 2500); delay(300);
   noTone(BUZZER_PIN);
+}
+
+void signalSDCardFailed() {
+  tone(BUZZER_PIN, 800); delay(800);
+  noTone(BUZZER_PIN); delay(800);
+  tone(BUZZER_PIN, 800); delay(800);
+  noTone(BUZZER_PIN); delay(800);
 }
 
 // -------------------- AUTENTIFIKÁCIA --------------------
