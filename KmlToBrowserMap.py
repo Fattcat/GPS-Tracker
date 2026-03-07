@@ -500,11 +500,11 @@ function initMap() {{
   const dark      = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
                       {{maxZoom:19}});
 
-  terrain.addTo(LM);  // ← predvolený: terén s vrstevnicami
+  satellite.addTo(LM);  // ← predvolený: terén s vrstevnicami
   L.control.layers({{
+    '🛰 Satelit':            satellite,
     '🏔 Terén (vrstevnice)': terrain,
     '🗺 OSM (ulice)':        osm,
-    '🛰 Satelit':            satellite,
     '🌙 Tmavá':              dark,
   }},{{}},{{collapsed:false,position:'topright'}}).addTo(LM);
 
