@@ -1,7 +1,12 @@
 # <p align="center">Simple tracking GPS with kml & esp32</p>
 ## Please support my work with Github Star :D
-## <p align="center">Setup</p>
 
+<p align="center">
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=Fattcat/GPS-Tracker" alt="Visitors"/>
+  <img src="https://img.shields.io/github/downloads/Fattcat/GPS-Tracker/total" alt="Downloads"/>
+</p>
+
+## <p align="center">Setup</p>
 ## <p align="center">Necesarry devices to use</p>
 -  esp32
 - Buzzer, SD card module, SD card, GPS neo6m
