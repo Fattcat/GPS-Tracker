@@ -1,4 +1,5 @@
 # <p align="center">Simple tracking GPS with kml & esp32</p>
+## Please support my work with Github Star :D
 ## <p align="center">Setup</p>
 
 ## <p align="center">Necesarry devices to use</p>
