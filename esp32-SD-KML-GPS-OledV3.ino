@@ -1,33 +1,38 @@
 /*
  * ============================================================
  *  GPS Tracker — ESP32 + SD + OLED + Buzzer
- *  Verzia: 2.0  |  Opravená & Vylepšená
+ *  Verzia: 3.0  |  Terén, bicykel, turistika
  * ============================================================
- *  OPRAVY:
- *   - KRITICKÁ: FILE_WRITE → FILE_APPEND v logGPS()
- *   - KRITICKÁ: finalizeKML() sa teraz volá pri stlačení tlačidla
- *   - Odstránený variable shadowing (lokálna kmlFile v logGPS)
- *   - UTC offset ako konfigurovateľná konštanta
- *   - Validácia GPS súradníc (ochrana pred 0,0 / NaN bodmi)
- *   - lastGPSWriteTime sa teraz správne aktualizuje
  *
- *  NOVÉ FUNKCIE:
- *   - Haversine filter — nový bod len ak sa pohneš ≥ MIN_DIST_M
- *   - Časovač medzi bodmi (LOG_INTERVAL_MS) — šetrí SD kartu
- *   - Počítadlo bodov + celková vzdialenosť na OLED
- *   - STOP tlačidlo (GPIO0 / BOOT) → správne ukončí KML
- *   - Štatistiky po ukončení záznamu na OLED
- *   - Rôzne zvukové signály (fix, strata signálu, koniec, chyba)
- *   - Boot obrazovka na OLED
- *   - F() makro pre konštantné stringy → úspora RAM
- *   - Záznam pokračuje aj bez OLED (OLED nie je blokujúci)
+ *  ZMENY v 3.0:
+ *   ✅ Formát CSV — súbor je VŽDY platný, aj po vypnutí bez tlačidla
+ *   ✅ GPS NOISE FILTER — nezapíše bod ak stojíš (rýchlosť < 1 km/h)
+ *   ✅ HDOP filter — zapisuje len keď je GPS presný (HDOP < 2.5)
+ *   ✅ Minimálne satelity zvýšené na 5
+ *   ✅ Minimálna vzdialenosť zvýšená na 5 m
+ *   ✅ UTC offset opravený + komentár pre letný/zimný čas
+ *   ✅ BOOT tlačidlo odstránené — vypni ESP32 kedykoľvek
+ *   ✅ OLED zobrazuje HDOP, rýchlosť, presnosť v reálnom čase
+ *   ✅ Automatická detekcia pohybu
  *
- *  ZAPOJENIE:
- *   GPS TX → GPIO16  |  GPS RX → GPIO17
- *   SD  CS → GPIO5   |  MOSI → GPIO23  |  MISO → GPIO19  |  SCK → GPIO18
- *   OLED SCL → GPIO22  |  OLED SDA → GPIO21
- *   Buzzer → GPIO4
- *   STOP tlačidlo → GPIO0 (zabudovaný BOOT button)
+ *  ZAPOJENIE ESP32-WROOM-32U:
+ *   GPS  TX → GPIO16  |  GPS  RX → GPIO17
+ *   SD   CS → GPIO5   |  MOSI → GPIO23  |  MISO → GPIO19  |  SCK → GPIO18
+ *   OLED SCL → GPIO22 |  OLED SDA → GPIO21
+ *   Buzzer  → GPIO4
+ *
+ *  VÝSTUPNÝ SÚBOR: /track0001.csv
+ *   Formát riadku: lat,lon,alt_m,HH:MM:SS,speed_kmh,hdop,satelity
+ *   Príklad: 48.123456,17.654321,312.5,14:32:15,4.2,1.2,8
+ *
+ *  GPS NOISE FILTERING — prečo záznamy bez pohybu:
+ *   NEO-6M v interiéri / slabý signál → GPS "blúdi" aj keď stojíš.
+ *   Riešenie: zapisujeme BOD len ak VŠETKY podmienky splnené:
+ *     1. GPS rýchlosť > MIN_SPEED_KMH  (0.8 km/h)
+ *     2. HDOP < MAX_HDOP               (2.5 = dobrá presnosť)
+ *     3. Satelity >= MIN_SATS          (5)
+ *     4. Pohyb od posledného bodu >= MIN_DIST_M (5 m)
+ *     5. Interval >= LOG_INTERVAL_MS   (2 sekundy)
  * ============================================================
  */
 
@@ -40,67 +45,81 @@
 #include <Adafruit_GFX.h>
 
 // ============================================================
-//  KONFIGURÁCIA — uprav podľa potreby
-// ============================================================
-#define GPS_RX           16       // GPS modul TX → ESP32 RX
-#define GPS_TX           17       // GPS modul RX → ESP32 TX
-#define SD_CS             5       // SD karta Chip Select
-#define BUZZER_PIN        4       // Pasívny bzučiak
-#define STOP_BTN_PIN      0       // BOOT tlačidlo — ukončí záznam
-
-#define UTC_OFFSET        2       // Letný čas: 2 | Zimný čas: 1
-#define LOG_INTERVAL_MS   3000    // Min. čas medzi GPS bodmi (ms)
-#define MIN_DIST_M        2.0f    // Min. pohyb pred novým bodom (metre)
-#define DISPLAY_UPDATE_MS 3000    // Interval obnovy OLED (ms)
-#define NO_FIX_WARN_MS    45000   // Čas bez GPS signálu pred upozornením (ms)
-#define MIN_SATELLITES    4       // Minimálny počet satelitov pre platný fix
+//  ⚙️  KONFIGURÁCIA — uprav podľa potreby
 // ============================================================
 
-#define SCREEN_WIDTH  128
-#define SCREEN_HEIGHT  64
-#define OLED_RESET     -1
+// Časová zóna:
+//   Zimný čas (október–marec): UTC_OFFSET = 1
+//   Letný čas (apríl–október): UTC_OFFSET = 2
+#define UTC_OFFSET        1
+
+// GPS filter — NE-zapisuj bod ak:
+#define MIN_SPEED_KMH     0.8f    // rýchlosť pod túto hodnotu = stojíš
+#define MAX_HDOP          2.5f    // HDOP nad túto hodnotu = zlá presnosť
+#define MIN_SATS          5       // menej satelitov = nespoľahlivý fix
+#define MIN_DIST_M        5.0f    // pohyb menej ako 5 m = ignoruj
+#define LOG_INTERVAL_MS   2000    // minimálny čas medzi bodmi (ms)
+
+// Piny
+#define GPS_RX            16
+#define GPS_TX            17
+#define SD_CS              5
+#define BUZZER_PIN         4
+
+// OLED
+#define SCREEN_WIDTH      128
+#define SCREEN_HEIGHT      64
+#define OLED_RESET         -1
+
+// Debug — vypni ak nechceš NMEA výpis na Serial
+#define DEBUG_SERIAL      true
+// ============================================================
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-bool oledAvailable = false;
+bool oledOK = false;
 
 TinyGPSPlus gps;
 HardwareSerial SerialGPS(1);
 
-// --- Stav záznamu ---
-bool     kmlStarted      = false;
-bool     gpsFixAnnounced = false;
-bool     isRecording     = true;
-char     kmlFileName[22];
+// --- Stav ---
+char     csvFileName[22];
+bool     csvReady        = false;
+bool     gpsUartOK       = false;
+bool     fixAnnounced    = false;
+bool     isMoving        = false;
 
 // --- Štatistiky ---
-uint32_t pointCount   = 0;
-float    totalDistM   = 0.0f;
+uint32_t pointCount      = 0;
+uint32_t skippedNoise    = 0;   // počet zamietnutých bodov (šum)
+float    totalDistM      = 0.0f;
 
-// --- Posledná zapísaná pozícia (pre Haversine filter) ---
-double   lastLat    = 0.0;
-double   lastLng    = 0.0;
-bool     hasLastPos = false;
+// --- Posledná pozícia ---
+double   lastLat         = 0.0;
+double   lastLng         = 0.0;
+bool     hasLastPos      = false;
 
 // --- Časovače ---
-unsigned long lastGPSWriteTime  = 0;
-unsigned long lastWarningTime   = 0;
-unsigned long lastDisplayUpdate = 0;
-unsigned long lastBtnCheck      = 0;
+unsigned long lastWriteMs    = 0;
+unsigned long lastDisplayMs  = 0;
+unsigned long lastUartCheck  = 0;
+unsigned long bootMs         = 0;
+unsigned long uartCharCount  = 0;
 
-// --- Zobrazenie času/dátumu ---
-String localTimeStr = "--:--";
-String localDateStr = "--.--.----";
+// --- Zobrazenie ---
+String   dispTime        = "--:--";
+String   dispDate        = "--.--.----";
+bool     hasTime         = false;
 
 // ============================================================
-//  HAVERSINE — vzdialenosť dvoch GPS bodov v metroch
+//  HAVERSINE — vzdialenosť v metroch
 // ============================================================
-float haversineM(double lat1, double lon1, double lat2, double lon2) {
+float haversineM(double la1, double lo1, double la2, double lo2) {
   const float R = 6371000.0f;
-  float dLat = radians((float)(lat2 - lat1));
-  float dLon = radians((float)(lon2 - lon1));
-  float a = sinf(dLat * 0.5f) * sinf(dLat * 0.5f)
-          + cosf(radians((float)lat1)) * cosf(radians((float)lat2))
-          * sinf(dLon * 0.5f) * sinf(dLon * 0.5f);
+  float dLa = radians((float)(la2 - la1));
+  float dLo = radians((float)(lo2 - lo1));
+  float a   = sinf(dLa*.5f)*sinf(dLa*.5f)
+            + cosf(radians((float)la1))*cosf(radians((float)la2))
+            * sinf(dLo*.5f)*sinf(dLo*.5f);
   return R * 2.0f * atan2f(sqrtf(a), sqrtf(1.0f - a));
 }
 
@@ -109,343 +128,379 @@ float haversineM(double lat1, double lon1, double lat2, double lon2) {
 // ============================================================
 void setup() {
   Serial.begin(115200);
+  delay(200);
+  Serial.println(F("\n========================================"));
+  Serial.println(F("  GPS TRACKER v3.0  |  CSV Noise Filter"));
+  Serial.println(F("========================================"));
+  Serial.printf("  UTC offset: +%d\n", UTC_OFFSET);
+  Serial.printf("  Min rychlost: %.1f km/h\n", MIN_SPEED_KMH);
+  Serial.printf("  Max HDOP: %.1f\n", MAX_HDOP);
+  Serial.printf("  Min satelity: %d\n", MIN_SATS);
+  Serial.printf("  Min vzdialenost: %.0f m\n\n", MIN_DIST_M);
+
   SerialGPS.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+  bootMs = millis();
 
   pinMode(BUZZER_PIN, OUTPUT);
   noTone(BUZZER_PIN);
-  pinMode(STOP_BTN_PIN, INPUT_PULLUP);
 
-  // OLED — neblokujúci init
+  // OLED
   if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    oledAvailable = true;
+    oledOK = true;
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
-    showBootScreen();
+    bootScreen();
+    Serial.println(F("[OLED] OK"));
   } else {
-    Serial.println(F("OLED nenajdene — pokracujem bez displeja"));
+    Serial.println(F("[OLED] Nenajdene, pokracujem bez displeja"));
   }
 
-  // SD karta
+  // SD
+  Serial.print(F("[SD] Inicializujem... "));
   if (!SD.begin(SD_CS)) {
-    Serial.println(F("SD karta nenajdena!"));
-    signalCriticalError();
-    oledShowError(F("SD CHYBA!"));
-    while (true) { delay(1000); }   // Čakaj — nič iné nerob
+    Serial.println(F("CHYBA! Skontroluj: CS=5 MOSI=23 MISO=19 SCK=18"));
+    signalError();
+    oledMsg(F("SD CHYBA!"), F("CS=5 MOSI=23"), F("MISO=19 SCK=18"));
+    while (true) delay(1000);
   }
-  Serial.println(F("SD OK"));
+  Serial.println(F("OK"));
 
-  createNewKMLFile();
-  initKML();
+  // Vytvor CSV súbor
+  createCSVFile();
+
+  Serial.println(F("[GPS] Cakam na UART signal z NEO-6M..."));
+  Serial.println(F("[GPS] Ak nevidis NMEA vety, zamen TX<->RX kable!\n"));
 }
 
 // ============================================================
-//  HLAVNÁ SLUČKA
+//  LOOP
 // ============================================================
 void loop() {
-  // 1) Načítaj GPS dáta
-  while (SerialGPS.available()) {
-    gps.encode(SerialGPS.read());
-  }
-
-  // 2) Aktualizuj čas/dátum zo GPS
-  updateLocalTimeFromGPS();
-
-  // 3) Kontrola STOP tlačidla (s debounce)
   unsigned long now = millis();
-  if (now - lastBtnCheck > 200) {
-    lastBtnCheck = now;
-    if (digitalRead(STOP_BTN_PIN) == LOW && isRecording) {
-      finalizeKML();
-      isRecording = false;
-      Serial.println(F("Zaznam ukonceny tlacidlom."));
-      signalTrackFinished();
-      displayStopped();
-      return;
-    }
+
+  // --- Čítaj GPS ---
+  while (SerialGPS.available()) {
+    char c = SerialGPS.read();
+    uartCharCount++;
+    if (DEBUG_SERIAL) Serial.write(c);
+    gps.encode(c);
   }
 
-  if (!isRecording) return;
-
-  // 4) Zápis GPS bodu
-  if (gps.location.isValid()
-      && gps.altitude.isValid()
-      && gps.time.isValid()
-      && gps.location.lat() != 0.0   // Ochrana pred nulovými súradnicami
-      && gps.location.lng() != 0.0
-      && !isnan(gps.location.lat())
-      && !isnan(gps.location.lng())) {
-
-    if (now - lastGPSWriteTime >= (unsigned long)LOG_INTERVAL_MS) {
-      double lat = gps.location.lat();
-      double lng = gps.location.lng();
-      double alt = gps.altitude.meters();
-
-      // Haversine filter — zaloguj len ak bol pohyb
-      float dist = hasLastPos
-                   ? haversineM(lastLat, lastLng, lat, lng)
-                   : 999.0f;   // Prvý bod vždy zapíš
-
-      if (!hasLastPos || dist >= MIN_DIST_M) {
-        if (logGPS(lat, lng, alt,
-                   gps.time.hour(),
-                   gps.time.minute(),
-                   gps.time.second())) {
-          if (hasLastPos) totalDistM += dist;
-          lastLat    = lat;
-          lastLng    = lng;
-          hasLastPos = true;
-          lastGPSWriteTime = now;
-          pointCount++;
-        }
-      }
+  // --- UART watchdog (každých 5s) ---
+  if (now - lastUartCheck > 5000) {
+    lastUartCheck = now;
+    if (uartCharCount == 0 && !gpsUartOK) {
+      Serial.println(F("[GPS] ZIADNE DATA! Zamen TX<->RX alebo skontroluj 3.3V napajanie."));
+      oledNoUart(now);
+    } else if (uartCharCount > 0 && !gpsUartOK) {
+      gpsUartOK = true;
+      Serial.println(F("\n[GPS] UART OK — prijinam NMEA vety"));
     }
+    uartCharCount = 0;
   }
 
-  // 5) Signál pri prvom GPS fixe
+  // --- Aktualizuj čas (aj bez plného fixu) ---
+  refreshTime();
+
+  // --- GPS fix announcement ---
   if (gps.satellites.isValid()
-      && gps.satellites.value() >= MIN_SATELLITES
-      && !gpsFixAnnounced) {
-    signalGPSFix();
-    gpsFixAnnounced = true;
+   && (int)gps.satellites.value() >= MIN_SATS
+   && gps.hdop.isValid()
+   && gps.hdop.hdop() <= MAX_HDOP
+   && !fixAnnounced) {
+    fixAnnounced = true;
+    signalFix();
+    Serial.printf("[GPS] FIX! Sat:%d HDOP:%.1f\n",
+                  (int)gps.satellites.value(), gps.hdop.hdop());
   }
 
-  // 6) Upozornenie na stratu GPS signálu (len ak sme fix mali)
-  if (gpsFixAnnounced
-      && now - lastGPSWriteTime > NO_FIX_WARN_MS
-      && now - lastWarningTime  > NO_FIX_WARN_MS) {
-    signalNoSignal();
-    lastWarningTime = now;
-    Serial.println(F("UPOZORNENIE: GPS signal strateny!"));
+  // --- Zápis bodu ---
+  if (now - lastWriteMs >= (unsigned long)LOG_INTERVAL_MS) {
+    tryLogPoint(now);
   }
 
-  // 7) Aktualizácia OLED displeja
-  if (now - lastDisplayUpdate > DISPLAY_UPDATE_MS) {
-    lastDisplayUpdate = now;
-    displayInfo();
+  // --- OLED refresh ---
+  if (now - lastDisplayMs > 1500) {
+    lastDisplayMs = now;
+    refreshDisplay(now);
   }
 }
 
 // ============================================================
-//  AKTUALIZÁCIA LOKÁLNEHO ČASU
+//  GPS BOD — filter + zápis
 // ============================================================
-void updateLocalTimeFromGPS() {
-  if (!gps.time.isValid() || !gps.date.isValid()) return;
-
-  int hour = ((int)gps.time.hour() + UTC_OFFSET) % 24;
-
-  char timeStr[6];
-  snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, (int)gps.time.minute());
-  localTimeStr = String(timeStr);
-
-  char dateStr[11];
-  snprintf(dateStr, sizeof(dateStr), "%02d.%02d.%d",
-           (int)gps.date.day(),
-           (int)gps.date.month(),
-           (int)gps.date.year());
-  localDateStr = String(dateStr);
-}
-
-// ============================================================
-//  SD / KML FUNKCIE
-// ============================================================
-
-// Nájde prvý voľný názov súboru track0001.kml – track9999.kml
-void createNewKMLFile() {
-  for (int i = 1; i <= 9999; i++) {
-    snprintf(kmlFileName, sizeof(kmlFileName), "/track%04d.kml", i);
-    if (!SD.exists(kmlFileName)) {
-      Serial.print(F("Novy subor: "));
-      Serial.println(kmlFileName);
-      return;
-    }
-  }
-  // Záchrana — prepíš posledný slot
-  snprintf(kmlFileName, sizeof(kmlFileName), "/track9999.kml");
-  Serial.println(F("SD plna — pouzivam track9999.kml"));
-}
-
-// Zapíše hlavičku KML súboru
-void initKML() {
-  File f = SD.open(kmlFileName, FILE_WRITE);
-  if (!f) {
-    Serial.println(F("Chyba pri vytvarani KML!"));
-    signalCriticalError();
-    oledShowError(F("KML CHYBA!"));
+void tryLogPoint(unsigned long now) {
+  // --- Základná validácia ---
+  if (!gps.location.isValid()
+   || !gps.altitude.isValid()
+   || !gps.time.isValid()
+   || !gps.speed.isValid()
+   || !gps.hdop.isValid()
+   || !gps.satellites.isValid()) {
     return;
   }
-  f.println(F("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
-  f.println(F("<kml xmlns=\"http://www.opengis.net/kml/2.2\">"));
-  f.println(F("<Document>"));
-  f.println(F("  <name>GPS Track</name>"));
-  f.println(F("  <Style id=\"trackStyle\">"));
-  f.println(F("    <LineStyle><color>ff0000ff</color><width>3</width></LineStyle>"));
-  f.println(F("  </Style>"));
-  f.println(F("  <Placemark>"));
-  f.println(F("    <name>My Route</name>"));
-  f.println(F("    <styleUrl>#trackStyle</styleUrl>"));
-  f.println(F("    <LineString>"));
-  f.println(F("      <altitudeMode>absolute</altitudeMode>"));
-  f.println(F("      <coordinates>"));
-  f.close();
-  kmlStarted = true;
-  Serial.println(F("KML inicializovany."));
-}
 
-// Zapíše jeden GPS bod — vracia true pri úspechu
-// OPRAVA: FILE_APPEND namiesto FILE_WRITE
-// OPRAVA: Odstránený variable shadowing globálnej kmlFile
-bool logGPS(double lat, double lng, double alt,
-            int hour, int minute, int second) {
-  if (!kmlStarted) return false;
+  double lat  = gps.location.lat();
+  double lng  = gps.location.lng();
+  double alt  = gps.altitude.meters();
+  float  spd  = gps.speed.kmph();
+  float  hdop = gps.hdop.hdop();
+  int    sats = (int)gps.satellites.value();
 
-  File f = SD.open(kmlFileName, FILE_APPEND);   // ← OPRAVA: FILE_APPEND
-  if (!f) {
-    Serial.println(F("Chyba pri zapise GPS bodu!"));
-    signalWriteFailure();
-    return false;
+  // --- Ochrana pred nulovými súradnicami ---
+  if (lat == 0.0 || lng == 0.0 || isnan(lat) || isnan(lng)) return;
+
+  // ════════════════════════════════════════
+  //  GPS NOISE FILTER
+  // ════════════════════════════════════════
+
+  // 1) Rýchlosť — primárny filter šumu
+  //    GPS šum spôsobuje "pohyb" aj keď stojíš
+  //    ale rýchlosť zostáva blízko nuly
+  if (spd < MIN_SPEED_KMH) {
+    skippedNoise++;
+    isMoving = false;
+    return;
   }
 
-  // Časový komentár (UTC)
-  f.printf("        <!-- %02d:%02d:%02d UTC -->\n", hour, minute, second);
-  // KML súradnice: lon,lat,alt (7 desatinných miest = ~1 cm presnosť)
-  f.printf("        %.7f,%.7f,%.1f\n", lng, lat, alt);
+  // 2) Presnosť HDOP
+  //    < 1.0 = výborná  |  1–2 = dobrá  |  2–5 = prijateľná  |  > 5 = zlá
+  if (hdop > MAX_HDOP) {
+    skippedNoise++;
+    return;
+  }
+
+  // 3) Počet satelitov
+  if (sats < MIN_SATS) {
+    skippedNoise++;
+    return;
+  }
+
+  // 4) Vzdialenosť od posledného bodu
+  float dist = 0.0f;
+  if (hasLastPos) {
+    dist = haversineM(lastLat, lastLng, lat, lng);
+    if (dist < MIN_DIST_M) {
+      skippedNoise++;
+      return;
+    }
+  }
+
+  // ════════════════════════════════════════
+  //  VŠETKY FILTRE PREŠLI — zapíš bod
+  // ════════════════════════════════════════
+  isMoving = true;
+
+  int h = ((int)gps.time.hour() + UTC_OFFSET) % 24;
+  int m = (int)gps.time.minute();
+  int s = (int)gps.time.second();
+
+  if (writeCSVPoint(lat, lng, alt, h, m, s, spd, hdop, sats)) {
+    if (hasLastPos) totalDistM += dist;
+    lastLat = lat; lastLng = lng; hasLastPos = true;
+    lastWriteMs = now;
+    pointCount++;
+
+    Serial.printf("[BOD %4lu] %.6f,%.6f  Alt:%.0fm  Spd:%.1fkm/h"
+                  "  HDOP:%.1f  Sat:%d  Dist:%.0fm\n",
+                  pointCount, lat, lng, alt, spd, hdop, sats,
+                  hasLastPos ? dist : 0.0f);
+  }
+}
+
+// ============================================================
+//  ČAS
+// ============================================================
+void refreshTime() {
+  if (!gps.time.isValid()) return;
+  int h = ((int)gps.time.hour() + UTC_OFFSET) % 24;
+  char t[6];
+  snprintf(t, sizeof(t), "%02d:%02d", h, (int)gps.time.minute());
+  dispTime = String(t);
+  hasTime  = true;
+
+  if (gps.date.isValid() && gps.date.year() > 2000) {
+    char d[11];
+    snprintf(d, sizeof(d), "%02d.%02d.%d",
+             (int)gps.date.day(), (int)gps.date.month(), (int)gps.date.year());
+    dispDate = String(d);
+  }
+}
+
+// ============================================================
+//  CSV SÚBOR
+// ============================================================
+void createCSVFile() {
+  for (int i = 1; i <= 9999; i++) {
+    snprintf(csvFileName, sizeof(csvFileName), "/track%04d.csv", i);
+    if (!SD.exists(csvFileName)) {
+      Serial.printf("[SD] Novy subor: %s\n", csvFileName);
+      break;
+    }
+  }
+  // Záhlavie CSV
+  File f = SD.open(csvFileName, FILE_WRITE);
+  if (f) {
+    f.println(F("lat,lon,alt_m,time,speed_kmh,hdop,satellites"));
+    f.close();
+    csvReady = true;
+    Serial.println(F("[SD] CSV subor vytvoreny s hlavickou."));
+  } else {
+    Serial.println(F("[SD] Chyba pri vytvarani CSV!"));
+    signalError();
+    oledMsg(F("CSV CHYBA!"), F(""), F(""));
+    while (true) delay(1000);
+  }
+}
+
+bool writeCSVPoint(double lat, double lng, double alt,
+                   int h, int m, int s,
+                   float spd, float hdop, int sats) {
+  if (!csvReady) return false;
+  File f = SD.open(csvFileName, FILE_APPEND);
+  if (!f) {
+    Serial.println(F("[SD] Chyba pri zapise!"));
+    signalWriteErr();
+    return false;
+  }
+  // lat,lon,alt_m,HH:MM:SS,speed,hdop,sats
+  f.printf("%.7f,%.7f,%.1f,%02d:%02d:%02d,%.2f,%.2f,%d\n",
+           lat, lng, alt, h, m, s, spd, hdop, sats);
   f.close();
   return true;
 }
 
-// Správne uzavrie KML súbor — MUSÍ sa zavolať pred vypnutím!
-void finalizeKML() {
-  if (!kmlStarted) return;
-
-  File f = SD.open(kmlFileName, FILE_APPEND);
-  if (f) {
-    f.println(F("      </coordinates>"));
-    f.println(F("    </LineString>"));
-    f.println(F("  </Placemark>"));
-    f.println(F("</Document>"));
-    f.println(F("</kml>"));
-    f.close();
-    kmlStarted = false;
-    Serial.println(F("KML riadne uzavrety."));
-  } else {
-    Serial.println(F("Chyba pri uzavreti KML!"));
-  }
-}
-
 // ============================================================
-//  OLED DISPLEJ
+//  OLED
 // ============================================================
-
-void showBootScreen() {
-  if (!oledAvailable) return;
+void bootScreen() {
+  if (!oledOK) return;
   display.clearDisplay();
   display.setTextSize(2);
-  display.setCursor(10, 8);
-  display.println(F("GPS"));
-  display.setCursor(10, 28);
-  display.println(F("TRACKER"));
+  display.setCursor(8, 4);  display.println(F("GPS"));
+  display.setCursor(8, 24); display.println(F("TRACKER"));
   display.setTextSize(1);
-  display.setCursor(15, 50);
-  display.println(F("Inicializacia..."));
+  display.setCursor(2, 50); display.println(F("v3.0  Inicializujem..."));
   display.display();
-  delay(1200);
+  delay(900);
 }
 
-void oledShowError(const __FlashStringHelper* msg) {
-  if (!oledAvailable) return;
+void oledMsg(const __FlashStringHelper* l1,
+             const __FlashStringHelper* l2,
+             const __FlashStringHelper* l3) {
+  if (!oledOK) return;
   display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(5, 20);
-  display.println(msg);
-  display.display();
-}
-
-void displayInfo() {
-  if (!oledAvailable) return;
-  display.clearDisplay();
-
-  // --- Čas (veľký) ---
-  display.setTextSize(3);
-  display.setCursor(8, 2);
-  display.print(localTimeStr);
-
-  // --- Dátum ---
   display.setTextSize(1);
-  int dw = (int)localDateStr.length() * 6;
-  display.setCursor(max(0, (SCREEN_WIDTH - dw) / 2), 38);
-  display.print(localDateStr);
-
-  // --- Stav REC / STP + počet bodov ---
-  display.setCursor(0, 48);
-  if (isRecording) {
-    display.print(F("REC "));
-  } else {
-    display.print(F("STP "));
-  }
-  display.print(pointCount);
-  display.print(F("b"));
-
-  // --- Vzdialenosť ---
-  display.setCursor(0, 57);
-  if (totalDistM < 1000.0f) {
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%.0fm", totalDistM);
-    display.print(buf);
-  } else {
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%.2fkm", totalDistM / 1000.0f);
-    display.print(buf);
-  }
-
-  // --- Satelity (vpravo hore) ---
-  int satCount = gps.satellites.isValid() ? (int)gps.satellites.value() : 0;
-  char satBuf[6];
-  snprintf(satBuf, sizeof(satBuf), "S%d", satCount);
-  display.setCursor(SCREEN_WIDTH - (int)strlen(satBuf) * 6, 38);
-  display.print(satBuf);
-
-  // --- HDOP / kvalita GPS (vpravo dole) ---
-  const char* hdopStr = "NoGPS";
-  if (gps.hdop.isValid()) {
-    float h = gps.hdop.hdop();
-    if      (h <= 1.0f) hdopStr = "Excel";
-    else if (h <= 2.0f) hdopStr = "Dobre";
-    else if (h <= 5.0f) hdopStr = "OK";
-    else if (h <= 10.f) hdopStr = "Slabo";
-    else                hdopStr = "Bad";
-  }
-  display.setCursor(SCREEN_WIDTH - (int)strlen(hdopStr) * 6, 57);
-  display.print(hdopStr);
-
+  display.setCursor(0,  4); display.println(l1);
+  display.setCursor(0, 22); display.println(l2);
+  display.setCursor(0, 38); display.println(l3);
   display.display();
 }
 
-void displayStopped() {
-  if (!oledAvailable) return;
+void oledNoUart(unsigned long now) {
+  if (!oledOK) return;
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0,  0); display.println(F("GPS: ZIADNE DATA!"));
+  display.setCursor(0, 12); display.println(F("Skontroluj TX/RX:"));
+  display.setCursor(0, 24); display.println(F("TX modulu -> GPIO16"));
+  display.setCursor(0, 36); display.println(F("RX modulu -> GPIO17"));
+  display.setCursor(0, 50); display.println(F("Napajanie: 3.3V!"));
+  display.display();
+}
+
+void refreshDisplay(unsigned long now) {
+  if (!oledOK) return;
   display.clearDisplay();
 
-  display.setTextSize(2);
-  display.setCursor(22, 2);
-  display.println(F("STOP"));
+  int  sats  = gps.satellites.isValid() ? (int)gps.satellites.value() : 0;
+  float hdop = gps.hdop.isValid()       ? gps.hdop.hdop()             : 99.0f;
+  float spd  = gps.speed.isValid()      ? gps.speed.kmph()            : 0.0f;
+  bool  good = fixAnnounced && hdop <= MAX_HDOP && sats >= MIN_SATS;
 
-  display.setTextSize(1);
-  display.setCursor(0, 30);
-  display.print(F("Body: "));
-  display.println(pointCount);
+  if (!gpsUartOK) {
+    // ── Žiadny UART ──────────────────────────
+    display.setTextSize(1);
+    display.setCursor(0, 0); display.println(F("GPS: ZIADNY SIGNAL"));
+    display.setCursor(0,14); display.println(F("TX->GPIO16"));
+    display.setCursor(0,24); display.println(F("RX->GPIO17"));
+    char buf[18];
+    snprintf(buf, sizeof(buf), "Cakam: %lus", (now-bootMs)/1000);
+    display.setCursor(0, 50); display.print(buf);
 
-  display.setCursor(0, 42);
-  if (totalDistM < 1000.0f) {
-    char buf[16];
-    snprintf(buf, sizeof(buf), "Dlzka: %.0f m", totalDistM);
-    display.print(buf);
+  } else if (!good) {
+    // ── Hľadám fix ───────────────────────────
+    display.setTextSize(1);
+    display.setCursor(0, 0); display.println(F("Hladam satelity..."));
+
+    // Satelitný bar
+    char satLine[20];
+    snprintf(satLine, sizeof(satLine), "Sat: %d/%d  HDOP:%.1f", sats, MIN_SATS, hdop < 99 ? hdop : 0.0f);
+    display.setCursor(0, 13); display.print(satLine);
+
+    // Vizuálne bloky
+    for (int i = 0; i < min(sats, 10); i++)
+      display.fillRect(i*12, 25, 10, 8, SSD1306_WHITE);
+    for (int i = sats; i < MIN_SATS; i++)
+      display.drawRect(i*12, 25, 10, 8, SSD1306_WHITE);
+
+    if (hasTime) {
+      display.setCursor(0, 38);
+      display.print(F("Cas: ")); display.print(dispTime);
+    }
+
+    unsigned long sec = (now - bootMs) / 1000;
+    char tbuf[18];
+    if (sec < 60) snprintf(tbuf, sizeof(tbuf), "Cakam: %lus", sec);
+    else          snprintf(tbuf, sizeof(tbuf), "Cakam: %lum%lus", sec/60, sec%60);
+    display.setCursor(0, 52); display.print(tbuf);
+
   } else {
-    char buf[20];
-    snprintf(buf, sizeof(buf), "Dlzka: %.3f km", totalDistM / 1000.0f);
-    display.print(buf);
-  }
+    // ── Fix OK — hlavné zobrazenie ────────────
 
-  display.setCursor(0, 54);
-  display.print(kmlFileName);
+    // Čas veľký
+    display.setTextSize(3);
+    display.setCursor(8, 0);
+    display.print(dispTime);
+
+    // Rýchlosť vedľa času (malá)
+    display.setTextSize(1);
+    char spdBuf[10];
+    if (spd >= 1.0f) snprintf(spdBuf, sizeof(spdBuf), "%.1fkm/h", spd);
+    else             strcpy(spdBuf, "STOJI");
+    display.setCursor(SCREEN_WIDTH - (int)strlen(spdBuf)*6, 2);
+    display.print(spdBuf);
+
+    // Dátum
+    display.setTextSize(1);
+    display.setCursor(0, 26); display.print(dispDate);
+
+    // Satelity + HDOP
+    char satHdop[20];
+    const char* hdopTxt = hdop<=1.0f?"Excel":hdop<=2.0f?"Dobre":hdop<=3.5f?"OK":"Slabo";
+    snprintf(satHdop, sizeof(satHdop), "S%d %s", sats, hdopTxt);
+    display.setCursor(0, 38); display.print(satHdop);
+
+    // Pohyb indikátor
+    display.setCursor(SCREEN_WIDTH - 36, 38);
+    display.print(isMoving ? F("[ REC]") : F("[STOP]"));
+
+    // Body + vzdialenosť
+    char ptBuf[22];
+    if (totalDistM < 1000.0f)
+      snprintf(ptBuf, sizeof(ptBuf), "%lub  %.0fm", pointCount, totalDistM);
+    else
+      snprintf(ptBuf, sizeof(ptBuf), "%lub %.2fkm", pointCount, totalDistM/1000.0f);
+    display.setCursor(0, 52); display.print(ptBuf);
+
+    // Zamietnuté šumové body
+    if (skippedNoise > 0) {
+      char skBuf[14];
+      snprintf(skBuf, sizeof(skBuf), "skip:%lu", skippedNoise);
+      display.setCursor(SCREEN_WIDTH - (int)strlen(skBuf)*6, 52);
+      display.print(skBuf);
+    }
+  }
 
   display.display();
 }
@@ -453,42 +508,18 @@ void displayStopped() {
 // ============================================================
 //  ZVUKOVÉ SIGNÁLY
 // ============================================================
-
-// 3× krátke — GPS fix získaný
-void signalGPSFix() {
+void signalFix() {
   for (int i = 0; i < 3; i++) {
-    tone(BUZZER_PIN, 2000); delay(100);
-    noTone(BUZZER_PIN);     delay(100);
+    tone(BUZZER_PIN, 2000); delay(90);
+    noTone(BUZZER_PIN);     delay(90);
   }
 }
-
-// 5× rýchle — chyba zápisu na SD
-void signalWriteFailure() {
-  for (int i = 0; i < 5; i++) {
-    tone(BUZZER_PIN, 1000); delay(80);
-    noTone(BUZZER_PIN);     delay(80);
+void signalWriteErr() {
+  for (int i = 0; i < 4; i++) {
+    tone(BUZZER_PIN, 800); delay(70);
+    noTone(BUZZER_PIN);    delay(70);
   }
 }
-
-// 2× dlhé — strata GPS signálu
-void signalNoSignal() {
-  tone(BUZZER_PIN, 700); delay(500);
-  noTone(BUZZER_PIN);    delay(200);
-  tone(BUZZER_PIN, 700); delay(500);
-  noTone(BUZZER_PIN);
-}
-
-// Vzostupná melódia — záznam úspešne ukončený
-void signalTrackFinished() {
-  int notes[] = {800, 1200, 1600, 2000};
-  for (int n : notes) {
-    tone(BUZZER_PIN, n); delay(120);
-    noTone(BUZZER_PIN);  delay(40);
-  }
-}
-
-// 1× dlhé nízke — fatálna chyba (SD/KML)
-void signalCriticalError() {
-  tone(BUZZER_PIN, 400); delay(1500);
-  noTone(BUZZER_PIN);
+void signalError() {
+  tone(BUZZER_PIN, 400); delay(1500); noTone(BUZZER_PIN);
 }
