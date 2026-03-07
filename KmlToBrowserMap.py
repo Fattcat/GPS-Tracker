@@ -328,7 +328,7 @@ html,body{{ width:100%; height:100%; overflow:hidden;
 
 /* ── INFO PANEL ── */
 #info{{
-  position:fixed; top:47px; right:10px; z-index:1000;
+  position:fixed; top:47px; right:200px; z-index:1000;
   background:rgba(11,14,20,.93); border:1px solid var(--border);
   border-radius:var(--r); padding:12px 15px; min-width:200px;
   backdrop-filter:blur(10px); font-size:11px;
@@ -351,7 +351,7 @@ html,body{{ width:100%; height:100%; overflow:hidden;
 #leg3{{
   position:fixed;
   top:48px;
-  right:220px;
+  right:400px;
   z-index:2000;
   background:rgba(11,14,20,.85);
   border:1px solid var(--border);
@@ -633,7 +633,7 @@ function init3D() {{
   
   
   //toto spôsobilo veľmi vysoké body v sekcií 3D v stránke const S=180/hR, AE=Math.max(1,hR/altRange*.3);
-  const S=180/hR, AE= 0.3
+  const S=180/hR, AE= 0.4
   
   T3._d={{xA,zA,yA,S,AE}};
 
