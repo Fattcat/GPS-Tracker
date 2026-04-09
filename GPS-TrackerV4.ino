@@ -507,7 +507,7 @@ void refreshDisplay(unsigned long now) {
   // =========================
   // BODY + VZDIALENOSŤ (stred spodok)
   // =========================
-  display.setCursor(55, 50);
+  display.setCursor(85, 50);
   display.print("B:");
   display.print(pointCount);
   display.print(" ");
