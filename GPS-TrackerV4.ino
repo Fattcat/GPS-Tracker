@@ -1,10 +1,10 @@
 /*
  * ============================================================
  *  GPS Tracker — ESP32 + SD + OLED + Buzzer
- *  Verzia: 3.0  |  Terén, bicykel, turistika
+ *  Verzia: 4.0  |  Terén, bicykel, turistika
  * ============================================================
  *
- *  ZMENY v 3.0:
+ *  ZMENY v 4.0:
  *   ✅ Formát CSV — súbor je VŽDY platný, aj po vypnutí bez tlačidla
  *   ✅ GPS NOISE FILTER — nezapíše bod ak stojíš (rýchlosť < 1 km/h)
  *   ✅ HDOP filter — zapisuje len keď je GPS presný (HDOP < 2.5)
